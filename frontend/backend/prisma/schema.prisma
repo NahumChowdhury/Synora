@@ -6,9 +6,199 @@ datasource db {
   provider = "postgresql"
 }
 
+enum Role {
+  USER
+  ADMIN
+}
+
+enum TaskCategory {
+  PPT
+  ASSIGNMENT
+  PRESENTATION
+  THESIS
+  DESIGN
+  CODING
+  RESEARCH
+  OTHER
+}
+
+enum TaskStatus {
+  OPEN
+  ASSIGNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum ApplicationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+}
+
+enum TeamCategory {
+  ACADEMIC
+  CLUB
+  STARTUP
+  TOUR
+  SKILLS
+  OTHER
+}
+
 model User {
-  id           Int      @id @default(autoincrement())
-  email        String   @unique
-  passwordHash String
-  createdAt    DateTime @default(now())
+  id                   Int                 @id @default(autoincrement())
+  email                String              @unique
+  passwordHash         String
+  role                 Role                @default(USER)
+  isBanned             Boolean             @default(false)
+  ratingSum            Float               @default(0)
+  ratingCount          Int                 @default(0)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt @default(now())
+
+  profile              Profile?
+  tasksCreated         Task[]              @relation("RequesterTasks")
+  tasksAssigned        Task[]              @relation("WorkerTasks")
+  taskApplications     TaskApplication[]
+  ratingsGiven         Rating[]            @relation("Rater")
+  ratingsReceived      Rating[]            @relation("Ratee")
+  teamPosts            TeamPost[]
+  teamApplications     TeamApplication[]
+  messagesSent         Message[]
+  conversationsAsUser1  Conversation[]     @relation("User1Conversations")
+  conversationsAsUser2  Conversation[]     @relation("User2Conversations")
+}
+
+model Profile {
+  id          Int      @id @default(autoincrement())
+  userId      Int      @unique
+  fullName    String?
+  department  String?
+  batch       String?
+  skills      String?
+  bio         String?
+  isPublic    Boolean  @default(true)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Task {
+  id               Int              @id @default(autoincrement())
+  title            String
+  description      String
+  category         TaskCategory     @default(OTHER)
+  requirements     String?
+  deadline         DateTime?
+  budget           Float?
+  status           TaskStatus       @default(OPEN)
+  requesterId      Int
+  assignedWorkerId Int?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt @default(now())
+
+  requester        User             @relation("RequesterTasks", fields: [requesterId], references: [id], onDelete: Cascade)
+  assignedWorker   User?            @relation("WorkerTasks", fields: [assignedWorkerId], references: [id])
+  applications     TaskApplication[]
+  ratings          Rating[]
+  conversation     Conversation?
+}
+
+model TaskApplication {
+  id          Int               @id @default(autoincrement())
+  taskId      Int
+  applicantId Int
+  message     String?
+  status      ApplicationStatus @default(PENDING)
+  createdAt   DateTime          @default(now())
+
+  task        Task              @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  applicant   User              @relation(fields: [applicantId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, applicantId])
+}
+
+model Rating {
+  id        Int      @id @default(autoincrement())
+  taskId    Int
+  raterId   Int
+  rateeId   Int
+  score     Int
+  comment   String?
+  createdAt DateTime @default(now())
+
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  rater     User     @relation("Rater", fields: [raterId], references: [id], onDelete: Cascade)
+  ratee     User     @relation("Ratee", fields: [rateeId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, raterId])
+}
+
+model TeamPost {
+  id                Int               @id @default(autoincrement())
+  authorId          Int
+  title             String
+  category          TeamCategory      @default(ACADEMIC)
+  subCategory       String?
+  description       String
+  lookingFor        String?
+  requiredSkills    String?
+  peopleNeeded      Int               @default(1)
+  deadline          DateTime?
+  department        String?
+  preferredBatch    String?
+  location          String?
+  meetingPreference String?
+  experienceReq     String?
+  contactInfo       String?
+  status            String            @default("OPEN")
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt @default(now())
+
+  author            User              @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  applications      TeamApplication[]
+}
+
+model TeamApplication {
+  id          Int               @id @default(autoincrement())
+  teamPostId  Int
+  applicantId Int
+  message     String?
+  status      ApplicationStatus @default(PENDING)
+  createdAt   DateTime          @default(now())
+
+  teamPost    TeamPost          @relation(fields: [teamPostId], references: [id], onDelete: Cascade)
+  applicant   User              @relation(fields: [applicantId], references: [id], onDelete: Cascade)
+
+  @@unique([teamPostId, applicantId])
+}
+
+model Conversation {
+  id        Int       @id @default(autoincrement())
+  taskId    Int?      @unique
+  user1Id   Int
+  user2Id   Int
+  createdAt DateTime  @default(now())
+
+  task      Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  user1     User      @relation("User1Conversations", fields: [user1Id], references: [id], onDelete: Cascade)
+  user2     User      @relation("User2Conversations", fields: [user2Id], references: [id], onDelete: Cascade)
+  messages  Message[]
+}
+
+model Message {
+  id             Int          @id @default(autoincrement())
+  conversationId Int
+  senderId       Int
+  content        String
+  createdAt      DateTime     @default(now())
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+}
+
+model FeatureSetting {
+  id               Int     @id @default(1)
+  taskBoardEnabled Boolean @default(true)
+  teamMatchEnabled Boolean @default(true)
+  ratingThreshold  Float   @default(2.5)
 }
