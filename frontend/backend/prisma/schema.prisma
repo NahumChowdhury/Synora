@@ -37,19 +37,19 @@ enum ApplicationStatus {
   WITHDRAWN
 }
 
-enum TeamCategory {
-  ACADEMIC
-  CLUB
-  STARTUP
-  TOUR
-  SKILLS
-  OTHER
+enum ReportStatus {
+  OPEN
+  REVIEWED
+  DISMISSED
+  ACTION_TAKEN
 }
 
 model User {
   id                   Int                 @id @default(autoincrement())
   email                String              @unique
-  passwordHash         String
+  passwordHash         String?
+  googleSub            String?              @unique
+  authProvider         String               @default("GOOGLE")
   role                 Role                @default(USER)
   isBanned             Boolean             @default(false)
   ratingSum            Float               @default(0)
@@ -63,11 +63,13 @@ model User {
   taskApplications     TaskApplication[]
   ratingsGiven         Rating[]            @relation("Rater")
   ratingsReceived      Rating[]            @relation("Ratee")
-  teamPosts            TeamPost[]
-  teamApplications     TeamApplication[]
   messagesSent         Message[]
   conversationsAsUser1  Conversation[]     @relation("User1Conversations")
   conversationsAsUser2  Conversation[]     @relation("User2Conversations")
+  blocksCreated          UserBlock[]         @relation("Blocker")
+  blocksReceived         UserBlock[]         @relation("Blocked")
+  messageReports         MessageReport[]     @relation("Reporter")
+  reviewedReports        MessageReport[]     @relation("ReportReviewer")
 }
 
 model Profile {
@@ -95,6 +97,7 @@ model Task {
   assignedWorkerId Int?
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt @default(now())
+  completedAt      DateTime?
 
   requester        User             @relation("RequesterTasks", fields: [requesterId], references: [id], onDelete: Cascade)
   assignedWorker   User?            @relation("WorkerTasks", fields: [assignedWorkerId], references: [id])
@@ -133,56 +136,18 @@ model Rating {
   @@unique([taskId, raterId])
 }
 
-model TeamPost {
-  id                Int               @id @default(autoincrement())
-  authorId          Int
-  title             String
-  category          TeamCategory      @default(ACADEMIC)
-  subCategory       String?
-  description       String
-  lookingFor        String?
-  requiredSkills    String?
-  peopleNeeded      Int               @default(1)
-  deadline          DateTime?
-  department        String?
-  preferredBatch    String?
-  location          String?
-  meetingPreference String?
-  experienceReq     String?
-  contactInfo       String?
-  status            String            @default("OPEN")
-  createdAt         DateTime          @default(now())
-  updatedAt         DateTime          @updatedAt @default(now())
-
-  author            User              @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  applications      TeamApplication[]
-}
-
-model TeamApplication {
-  id          Int               @id @default(autoincrement())
-  teamPostId  Int
-  applicantId Int
-  message     String?
-  status      ApplicationStatus @default(PENDING)
-  createdAt   DateTime          @default(now())
-
-  teamPost    TeamPost          @relation(fields: [teamPostId], references: [id], onDelete: Cascade)
-  applicant   User              @relation(fields: [applicantId], references: [id], onDelete: Cascade)
-
-  @@unique([teamPostId, applicantId])
-}
-
 model Conversation {
-  id        Int       @id @default(autoincrement())
-  taskId    Int?      @unique
-  user1Id   Int
-  user2Id   Int
-  createdAt DateTime  @default(now())
+  id         Int       @id @default(autoincrement())
+  taskId     Int?      @unique
+  user1Id    Int
+  user2Id    Int
+  createdAt  DateTime  @default(now())
 
-  task      Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
-  user1     User      @relation("User1Conversations", fields: [user1Id], references: [id], onDelete: Cascade)
-  user2     User      @relation("User2Conversations", fields: [user2Id], references: [id], onDelete: Cascade)
-  messages  Message[]
+  task       Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
+  user1      User      @relation("User1Conversations", fields: [user1Id], references: [id], onDelete: Cascade)
+  user2      User      @relation("User2Conversations", fields: [user2Id], references: [id], onDelete: Cascade)
+  messages   Message[]
+
 }
 
 model Message {
@@ -194,11 +159,43 @@ model Message {
 
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  reports        MessageReport[]
+}
+
+model UserBlock {
+  id        Int      @id @default(autoincrement())
+  blockerId Int
+  blockedId Int
+  createdAt DateTime @default(now())
+
+  blocker   User     @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked   User     @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@unique([blockerId, blockedId])
+  @@index([blockedId])
+}
+
+model MessageReport {
+  id           Int          @id @default(autoincrement())
+  messageId    Int
+  reporterId   Int
+  reason       String
+  details      String?
+  status       ReportStatus @default(OPEN)
+  reviewedById Int?
+  reviewedAt   DateTime?
+  createdAt    DateTime     @default(now())
+
+  message      Message      @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  reporter     User         @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reviewedBy   User?        @relation("ReportReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  @@unique([messageId, reporterId])
+  @@index([status, createdAt])
 }
 
 model FeatureSetting {
   id               Int     @id @default(1)
   taskBoardEnabled Boolean @default(true)
-  teamMatchEnabled Boolean @default(true)
   ratingThreshold  Float   @default(2.5)
 }

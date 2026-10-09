@@ -1,24 +1,14 @@
 import { Response } from "express";
 import { AuthenticatedRequest } from "../types/auth";
 import prisma from "../lib/prisma";
+import { optionalText, parsePositiveInt } from "../utils/validation";
 
 export const getMyProfile = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: {
-        profile: true,
-      },
-    });
-
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    const ratingAvg =
-      user.ratingCount > 0 ? (user.ratingSum / user.ratingCount).toFixed(1) : "New";
-
+    const user = await prisma.user.findUnique({ where: { id: userId }, include: { profile: true } });
+    if (!user) return res.status(404).json({ message: "User not found" });
+    const ratingAvg = user.ratingCount > 0 ? (user.ratingSum / user.ratingCount).toFixed(1) : "New";
     return res.status(200).json({
       id: user.id,
       email: user.email,
@@ -26,6 +16,7 @@ export const getMyProfile = async (req: AuthenticatedRequest, res: Response) => 
       rating: ratingAvg,
       ratingCount: user.ratingCount,
       profile: user.profile,
+      profileComplete: Boolean(user.profile?.fullName && user.profile?.department && user.profile?.batch),
     });
   } catch (error) {
     console.error("Get profile error:", error);
@@ -36,68 +27,43 @@ export const getMyProfile = async (req: AuthenticatedRequest, res: Response) => 
 export const updateMyProfile = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const userId = req.user!.userId;
-    const { fullName, department, batch, skills, bio } = req.body;
+    const fullName = optionalText(req.body?.fullName, 120);
+    const department = optionalText(req.body?.department, 120);
+    const batch = optionalText(req.body?.batch, 80);
+    const skills = optionalText(req.body?.skills, 1200);
+    const bio = optionalText(req.body?.bio, 2500);
+    if ([fullName, department, batch, skills, bio].includes(undefined)) {
+      return res.status(400).json({ message: "One or more profile fields exceed the allowed length." });
+    }
 
     const profile = await prisma.profile.upsert({
       where: { userId },
-      update: {
-        fullName,
-        department,
-        batch,
-        skills,
-        bio,
-      },
-      create: {
-        userId,
-        fullName,
-        department,
-        batch,
-        skills,
-        bio,
-      },
+      update: { fullName, department, batch, skills, bio },
+      create: { userId, fullName, department, batch, skills, bio },
     });
-
-    return res.status(200).json({
-      message: "Profile updated successfully",
-      profile,
-    });
+    return res.status(200).json({ message: "Profile updated successfully", profile });
   } catch (error) {
     console.error("Update profile error:", error);
     return res.status(500).json({ message: "Server error" });
   }
 };
 
-// ANONYMOUS PROFILE for Task Board (Hides University Email)
 export const getAnonymousWorkerProfile = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const workerId = parseInt(req.params.id as string);
+    const workerId = parsePositiveInt(req.params.id);
+    if (!workerId) return res.status(400).json({ message: "Invalid worker id" });
     const user = await prisma.user.findUnique({
       where: { id: workerId },
-      include: {
-        profile: true,
-        tasksAssigned: {
-          where: { status: "COMPLETED" },
-          select: { id: true },
-        },
-      },
+      include: { profile: true, tasksAssigned: { where: { status: "COMPLETED" }, select: { id: true } } },
     });
-
-    if (!user) {
-      return res.status(404).json({ message: "Worker not found" });
-    }
-
-    const ratingAvg =
-      user.ratingCount > 0 ? (user.ratingSum / user.ratingCount).toFixed(1) : "New";
-
-    // Strictly omit email for anonymity
+    if (!user) return res.status(404).json({ message: "Worker not found" });
+    const ratingAvg = user.ratingCount > 0 ? (user.ratingSum / user.ratingCount).toFixed(1) : "New";
     return res.status(200).json({
       workerAlias: `Student #${user.id}`,
       rating: ratingAvg,
       ratingCount: user.ratingCount,
       completedTasksCount: user.tasksAssigned.length,
       skills: user.profile?.skills || "General",
-      department: user.profile?.department || "DIU Student",
-      bio: user.profile?.bio || "",
     });
   } catch (error) {
     console.error("Get anonymous profile error:", error);
@@ -105,24 +71,13 @@ export const getAnonymousWorkerProfile = async (req: AuthenticatedRequest, res: 
   }
 };
 
-// PUBLIC PROFESSIONAL PROFILE for Team Match
 export const getPublicProfile = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const targetUserId = parseInt(req.params.id as string);
-    const user = await prisma.user.findUnique({
-      where: { id: targetUserId },
-      include: {
-        profile: true,
-      },
-    });
-
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-
-    const ratingAvg =
-      user.ratingCount > 0 ? (user.ratingSum / user.ratingCount).toFixed(1) : "New";
-
+    const targetUserId = parsePositiveInt(req.params.id);
+    if (!targetUserId) return res.status(400).json({ message: "Invalid user id" });
+    const user = await prisma.user.findUnique({ where: { id: targetUserId }, include: { profile: true } });
+    if (!user) return res.status(404).json({ message: "User not found" });
+    const ratingAvg = user.ratingCount > 0 ? (user.ratingSum / user.ratingCount).toFixed(1) : "New";
     return res.status(200).json({
       id: user.id,
       email: user.email,

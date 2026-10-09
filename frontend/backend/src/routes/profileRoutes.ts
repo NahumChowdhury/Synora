@@ -1,17 +1,19 @@
 import express from "express";
 import {
-  getMyProfile,
-  updateMyProfile,
   getAnonymousWorkerProfile,
+  getMyProfile,
   getPublicProfile,
+  updateMyProfile,
 } from "../controllers/profileController";
 import { authenticateToken } from "../middleware/authMiddleware";
+import { writeLimiter } from "../middleware/rateLimits";
 
 const router = express.Router();
+router.use(authenticateToken);
 
-router.get("/me", authenticateToken, getMyProfile);
-router.put("/me", authenticateToken, updateMyProfile);
-router.get("/anonymous/:id", authenticateToken, getAnonymousWorkerProfile);
-router.get("/public/:id", authenticateToken, getPublicProfile);
+router.get("/me", getMyProfile);
+router.put("/me", writeLimiter, updateMyProfile);
+router.get("/anonymous/:id", getAnonymousWorkerProfile);
+router.get("/public/:id", getPublicProfile);
 
 export default router;

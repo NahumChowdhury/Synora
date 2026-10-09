@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Synora — DIU Campus Platform",
-  description: "Unified campus collaboration platform for Daffodil International University students. Task Marketplace and Team Match.",
+  description: "Verified DIU student Task Marketplace with anonymous task identity, private messaging, and ratings.",
 };
 
 export default function RootLayout({

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { apiFetch } from "../../lib/api";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -9,62 +10,43 @@ export default function DashboardPage() {
   // Auth state
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<"tasks" | "team" | "chat" | "profile" | "admin">("tasks");
+  const [activeTab, setActiveTab] = useState<"tasks" | "chat" | "profile" | "admin">("tasks");
+
+  useEffect(() => {
+    const requested = new URLSearchParams(window.location.search).get("tab");
+    if (["tasks", "chat", "profile", "admin"].includes(requested || "")) {
+      setActiveTab(requested as "tasks" | "chat" | "profile" | "admin");
+    }
+  }, []);
+
 
   // Data states
   const [tasks, setTasks] = useState<any[]>([]);
-  const [teamPosts, setTeamPosts] = useState<any[]>([]);
   const [conversations, setConversations] = useState<any[]>([]);
   const [activeConversation, setActiveConversation] = useState<any>(null);
   const [messages, setMessages] = useState<any[]>([]);
   const [newMessageText, setNewMessageText] = useState("");
   const [featureSettings, setFeatureSettings] = useState<any>(null);
   const [adminUsersList, setAdminUsersList] = useState<any[]>([]);
+  const [adminReports, setAdminReports] = useState<any[]>([]);
 
   // Modals state
   const [showTaskModal, setShowTaskModal] = useState(false);
-  const [showTeamModal, setShowTeamModal] = useState(false);
   const [selectedTask, setSelectedTask] = useState<any>(null);
-  const [selectedTeamPost, setSelectedTeamPost] = useState<any>(null);
   const [showRatingModal, setShowRatingModal] = useState(false);
+  const [reportTarget, setReportTarget] = useState<{ id: number; preview: string } | null>(null);
+  const [reportForm, setReportForm] = useState({ reason: "HARASSMENT", details: "" });
+  const [taskFeatureUnavailable, setTaskFeatureUnavailable] = useState(false);
 
   // Form inputs
   const [newTask, setNewTask] = useState({ title: "", description: "", category: "OTHER", requirements: "", budget: "", deadline: "" });
   const [taskApplyMessage, setTaskApplyMessage] = useState("");
-
-  // Expanded Team Match Form State
-  const [newTeamPost, setNewTeamPost] = useState({
-    title: "",
-    category: "ACADEMIC",
-    subCategory: "University Project",
-    description: "",
-    lookingFor: "",
-    requiredSkills: "",
-    peopleNeeded: "1",
-    deadline: "",
-    department: "",
-    preferredBatch: "",
-    location: "",
-    meetingPreference: "In-Person",
-    experienceReq: "",
-    contactInfo: "",
-  });
-  const [teamApplyMessage, setTeamApplyMessage] = useState("");
 
   const [taskRatingForm, setTaskRatingForm] = useState({ score: 5, comment: "" });
   const [profileForm, setProfileForm] = useState({ fullName: "", department: "", batch: "", skills: "", bio: "" });
 
   // Filters & Search
   const [taskFilter, setTaskFilter] = useState({ category: "ALL", status: "ALL", search: "" });
-
-  // Team Match Filters
-  const [teamFilter, setTeamFilter] = useState({
-    category: "ALL",
-    subCategory: "ALL",
-    department: "ALL",
-    status: "OPEN",
-    search: "",
-  });
 
   // Notifications/Alerts
   const [statusMessage, setStatusMessage] = useState("");
@@ -79,16 +61,8 @@ export default function DashboardPage() {
   };
 
   const fetchAuthUser = async () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      router.push("/login");
-      return;
-    }
-
     try {
-      const res = await fetch("http://localhost:5000/api/auth/verify", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await apiFetch("/api/auth/verify");
 
       if (res.ok) {
         const data = await res.json();
@@ -103,74 +77,51 @@ export default function DashboardPage() {
           });
         }
       } else {
-        localStorage.clear();
-        router.push("/login");
+        router.replace(`/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
       }
     } catch {
-      localStorage.clear();
-      router.push("/login");
+      router.replace(`/login?next=${encodeURIComponent(window.location.pathname + window.location.search)}`);
     } finally {
       setLoading(false);
     }
   };
 
   const fetchTasks = async () => {
-    const token = localStorage.getItem("token");
     try {
-      let url = `http://localhost:5000/api/tasks?category=${taskFilter.category}&status=${taskFilter.status}`;
+      let url = `/api/tasks?category=${taskFilter.category}&status=${taskFilter.status}`;
       if (taskFilter.search.trim()) {
         url += `&search=${encodeURIComponent(taskFilter.search.trim())}`;
       }
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await apiFetch(url);
       if (res.ok) {
         const data = await res.json();
         setTasks(data);
+        setTaskFeatureUnavailable(false);
+      } else if (res.status === 403) {
+        setTasks([]);
+        setTaskFeatureUnavailable(true);
       }
     } catch (err) {
       console.error(err);
     }
   };
 
-  const fetchTeamPosts = async () => {
-    const token = localStorage.getItem("token");
-    try {
-      let url = `http://localhost:5000/api/team?category=${teamFilter.category}&status=${teamFilter.status}`;
-      if (teamFilter.department !== "ALL") {
-        url += `&department=${encodeURIComponent(teamFilter.department)}`;
-      }
-      if (teamFilter.search.trim()) {
-        url += `&search=${encodeURIComponent(teamFilter.search.trim())}`;
-      }
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-      if (res.ok) {
-        const data = await res.json();
-        setTeamPosts(data);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
 
-  const fetchSingleTeamPost = async (id: number) => {
-    const token = localStorage.getItem("token");
+  const fetchSingleTask = async (id: number) => {
     try {
-      const res = await fetch(`http://localhost:5000/api/team/${id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setSelectedTeamPost(data);
-      }
-    } catch (err) {
-      console.error(err);
+      const res = await apiFetch(`/api/tasks/${id}`);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) setSelectedTask(data);
+      else showNotification(data.message || "Task could not be opened", "error");
+    } catch {
+      showNotification("Task could not be opened", "error");
     }
   };
 
   const fetchConversations = async () => {
-    const token = localStorage.getItem("token");
     try {
-      const res = await fetch("http://localhost:5000/api/chat/conversations", {
-        headers: { Authorization: `Bearer ${token}` },
+      const res = await apiFetch("/api/chat/conversations", {
+
       });
       if (res.ok) {
         const data = await res.json();
@@ -182,20 +133,17 @@ export default function DashboardPage() {
   };
 
   const fetchAdminData = async () => {
-    const token = localStorage.getItem("token");
     try {
-      const sRes = await fetch("http://localhost:5000/api/admin/settings", {
-        headers: { Authorization: `Bearer ${token}` },
+      const sRes = await apiFetch("/api/admin/settings", {
+
       });
       if (sRes.ok) {
         setFeatureSettings(await sRes.json());
       }
-      const uRes = await fetch("http://localhost:5000/api/admin/users", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (uRes.ok) {
-        setAdminUsersList(await uRes.json());
-      }
+      const uRes = await apiFetch("/api/admin/users");
+      if (uRes.ok) setAdminUsersList(await uRes.json());
+      const rRes = await apiFetch("/api/admin/reports");
+      if (rRes.ok) setAdminReports(await rRes.json());
     } catch (err) {
       console.error(err);
     }
@@ -208,24 +156,23 @@ export default function DashboardPage() {
   useEffect(() => {
     if (!user) return;
     if (activeTab === "tasks") fetchTasks();
-    if (activeTab === "team") fetchTeamPosts();
     if (activeTab === "chat") fetchConversations();
     if (activeTab === "admin" && user.role === "ADMIN") fetchAdminData();
-  }, [user, activeTab, taskFilter, teamFilter]);
+  }, [user, activeTab, taskFilter]);
 
-  const handleLogout = () => {
-    localStorage.clear();
-    router.push("/login");
+  const handleLogout = async () => {
+    try { await apiFetch("/api/auth/logout", { method: "POST" }); } finally {
+      router.replace("/login");
+    }
   };
 
   // Task Handlers
   const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault();
-    const token = localStorage.getItem("token");
     try {
-      const res = await fetch("http://localhost:5000/api/tasks", {
+      const res = await apiFetch("/api/tasks", {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newTask),
       });
       const data = await res.json();
@@ -243,11 +190,10 @@ export default function DashboardPage() {
   };
 
   const handleApplyTask = async (taskId: number) => {
-    const token = localStorage.getItem("token");
     try {
-      const res = await fetch(`http://localhost:5000/api/tasks/${taskId}/apply`, {
+      const res = await apiFetch(`/api/tasks/${taskId}/apply`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: taskApplyMessage }),
       });
       const data = await res.json();
@@ -259,13 +205,12 @@ export default function DashboardPage() {
     }
   };
 
-  const handleSelectWorker = async (taskId: number, workerId: number) => {
-    const token = localStorage.getItem("token");
+  const handleSelectWorker = async (taskId: number, applicationId: number) => {
     try {
-      const res = await fetch(`http://localhost:5000/api/tasks/${taskId}/select-worker`, {
+      const res = await apiFetch(`/api/tasks/${taskId}/select-worker`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ workerId }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ applicationId }),
       });
       const data = await res.json();
       showNotification(data.message, res.ok ? "success" : "error");
@@ -277,30 +222,31 @@ export default function DashboardPage() {
     }
   };
 
-  const handleCompleteTask = async (taskId: number) => {
-    const token = localStorage.getItem("token");
+  const handleTaskStatus = async (taskId: number, status: "IN_PROGRESS" | "COMPLETED" | "CANCELLED") => {
     try {
-      const res = await fetch(`http://localhost:5000/api/tasks/${taskId}/status`, {
+      const res = await apiFetch(`/api/tasks/${taskId}/status`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ status: "COMPLETED" }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
       });
-      const data = await res.json();
-      showNotification(data.message, res.ok ? "success" : "error");
-      fetchTasks();
+      const data = await res.json().catch(() => ({}));
+      showNotification(data.message || "Task updated", res.ok ? "success" : "error");
+      if (res.ok) {
+        await fetchTasks();
+        await fetchSingleTask(taskId);
+      }
     } catch {
-      showNotification("Failed to complete task", "error");
+      showNotification("Task status update failed", "error");
     }
   };
 
   const handleRateTask = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedTask) return;
-    const token = localStorage.getItem("token");
     try {
-      const res = await fetch(`http://localhost:5000/api/tasks/${selectedTask.id}/rate`, {
+      const res = await apiFetch(`/api/tasks/${selectedTask.id}/rate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(taskRatingForm),
       });
       const data = await res.json();
@@ -312,126 +258,12 @@ export default function DashboardPage() {
     }
   };
 
-  // Team Match Handlers
-  const handleCreateTeamPost = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const token = localStorage.getItem("token");
-    try {
-      const res = await fetch("http://localhost:5000/api/team", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(newTeamPost),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setShowTeamModal(false);
-        setNewTeamPost({
-          title: "",
-          category: "ACADEMIC",
-          subCategory: "University Project",
-          description: "",
-          lookingFor: "",
-          requiredSkills: "",
-          peopleNeeded: "1",
-          deadline: "",
-          department: "",
-          preferredBatch: "",
-          location: "",
-          meetingPreference: "In-Person",
-          experienceReq: "",
-          contactInfo: "",
-        });
-        fetchTeamPosts();
-        showNotification("Opportunity published successfully!");
-      } else {
-        showNotification(data.message, "error");
-      }
-    } catch {
-      showNotification("Error publishing opportunity", "error");
-    }
-  };
-
-  const handleApplyTeamPost = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedTeamPost) return;
-    const token = localStorage.getItem("token");
-    try {
-      const res = await fetch(`http://localhost:5000/api/team/${selectedTeamPost.id}/apply`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ message: teamApplyMessage }),
-      });
-      const data = await res.json();
-      showNotification(data.message, res.ok ? "success" : "error");
-      setTeamApplyMessage("");
-      fetchSingleTeamPost(selectedTeamPost.id);
-      fetchTeamPosts();
-    } catch {
-      showNotification("Application failed", "error");
-    }
-  };
-
-  const handleUpdateApplicationStatus = async (appId: number, status: "ACCEPTED" | "REJECTED") => {
-    const token = localStorage.getItem("token");
-    try {
-      const res = await fetch(`http://localhost:5000/api/team/applications/${appId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ status }),
-      });
-      const data = await res.json();
-      showNotification(data.message, res.ok ? "success" : "error");
-      if (selectedTeamPost) fetchSingleTeamPost(selectedTeamPost.id);
-      if (status === "ACCEPTED") {
-        fetchConversations();
-      }
-    } catch {
-      showNotification("Status update failed", "error");
-    }
-  };
-
-  const handleToggleTeamStatus = async (postId: number, currentStatus: string) => {
-    const token = localStorage.getItem("token");
-    const nextStatus = currentStatus === "OPEN" ? "CLOSED" : "OPEN";
-    try {
-      const res = await fetch(`http://localhost:5000/api/team/${postId}/status`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ status: nextStatus }),
-      });
-      const data = await res.json();
-      showNotification(data.message, res.ok ? "success" : "error");
-      if (selectedTeamPost) fetchSingleTeamPost(selectedTeamPost.id);
-      fetchTeamPosts();
-    } catch {
-      showNotification("Failed to toggle status", "error");
-    }
-  };
-
-  const handleDeleteTeamPost = async (postId: number) => {
-    if (!confirm("Are you sure you want to delete this opportunity?")) return;
-    const token = localStorage.getItem("token");
-    try {
-      const res = await fetch(`http://localhost:5000/api/team/${postId}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const data = await res.json();
-      showNotification(data.message, res.ok ? "success" : "error");
-      setSelectedTeamPost(null);
-      fetchTeamPosts();
-    } catch {
-      showNotification("Failed to delete post", "error");
-    }
-  };
-
   const handleUpdateProfile = async (e: React.FormEvent) => {
     e.preventDefault();
-    const token = localStorage.getItem("token");
     try {
-      const res = await fetch("http://localhost:5000/api/profile/me", {
+      const res = await apiFetch("/api/profile/me", {
         method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(profileForm),
       });
       const data = await res.json();
@@ -445,16 +277,18 @@ export default function DashboardPage() {
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!activeConversation || !newMessageText.trim()) return;
-    const token = localStorage.getItem("token");
     try {
-      const res = await fetch(`http://localhost:5000/api/chat/conversations/${activeConversation.id}/messages`, {
+      const res = await apiFetch(`/api/chat/conversations/${activeConversation.id}/messages`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content: newMessageText }),
       });
+      const data = await res.json().catch(() => ({}));
       if (res.ok) {
         setNewMessageText("");
         openConversation(activeConversation);
+      } else {
+        showNotification(data.message || "Message could not be sent", "error");
       }
     } catch {
       showNotification("Failed to send message", "error");
@@ -463,26 +297,75 @@ export default function DashboardPage() {
 
   const openConversation = async (conv: any) => {
     setActiveConversation(conv);
-    const token = localStorage.getItem("token");
     try {
-      const res = await fetch(`http://localhost:5000/api/chat/conversations/${conv.id}/messages`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await apiFetch(`/api/chat/conversations/${conv.id}/messages`);
       if (res.ok) {
         const data = await res.json();
         setMessages(data.messages);
+        setActiveConversation({ ...conv, ...data, otherUser: data.otherUser || conv.otherUser });
+      } else {
+        const data = await res.json().catch(() => ({}));
+        showNotification(data.message || "Conversation could not be opened", "error");
       }
-    } catch (err) {
-      console.error(err);
+    } catch {
+      showNotification("Conversation could not be opened", "error");
+    }
+  };
+
+  const handleToggleBlock = async () => {
+    if (!activeConversation?.id) return;
+    const isBlocked = Boolean(activeConversation.blockedByMe);
+    if (!isBlocked && !confirm("Block this student? They will no longer be able to message you until you unblock them.")) return;
+    try {
+      const res = await apiFetch(`/api/chat/conversations/${activeConversation.id}/block`, { method: isBlocked ? "DELETE" : "POST" });
+      const data = await res.json().catch(() => ({}));
+      showNotification(data.message || (isBlocked ? "User unblocked" : "User blocked"), res.ok ? "success" : "error");
+      if (res.ok) {
+        await fetchConversations();
+        await openConversation({ ...activeConversation, blockedByMe: !isBlocked });
+      }
+    } catch {
+      showNotification("Block setting could not be updated", "error");
+    }
+  };
+
+  const openReportMessage = (messageId: number, content: string) => {
+    setReportForm({ reason: "HARASSMENT", details: "" });
+    setReportTarget({ id: messageId, preview: content.slice(0, 180) });
+  };
+
+  const handleReportMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reportTarget) return;
+    try {
+      const res = await apiFetch(`/api/chat/messages/${reportTarget.id}/report`, {
+        method: "POST",
+        body: JSON.stringify(reportForm),
+      });
+      const data = await res.json().catch(() => ({}));
+      showNotification(data.message || "Report submitted", res.ok ? "success" : "error");
+      if (res.ok) setReportTarget(null);
+    } catch {
+      showNotification("Report could not be submitted", "error");
+    }
+  };
+
+  const handleUpdateReport = async (reportId: number, status: "REVIEWED" | "DISMISSED" | "ACTION_TAKEN") => {
+    try {
+      const res = await apiFetch(`/api/admin/reports/${reportId}`, { method: "PATCH", body: JSON.stringify({ status }) });
+      const data = await res.json().catch(() => ({}));
+      showNotification(data.message || "Report updated", res.ok ? "success" : "error");
+      if (res.ok) fetchAdminData();
+    } catch {
+      showNotification("Report update failed", "error");
     }
   };
 
   const handleToggleBanUser = async (userId: number) => {
-    const token = localStorage.getItem("token");
     try {
-      const res = await fetch(`http://localhost:5000/api/admin/users/${userId}/ban`, {
+      const res = await apiFetch(`/api/admin/users/${userId}/ban`, {
         method: "PATCH",
-        headers: { Authorization: `Bearer ${token}` },
+
       });
       const data = await res.json();
       showNotification(data.message, res.ok ? "success" : "error");
@@ -494,12 +377,11 @@ export default function DashboardPage() {
 
   const handleToggleFeature = async (featureName: string, currentValue: boolean) => {
     if (!featureSettings) return;
-    const token = localStorage.getItem("token");
     const updated = { ...featureSettings, [featureName]: !currentValue };
     try {
-      const res = await fetch("http://localhost:5000/api/admin/settings", {
+      const res = await apiFetch("/api/admin/settings", {
         method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(updated),
       });
       const data = await res.json();
@@ -564,8 +446,7 @@ export default function DashboardPage() {
         <div className="border-b border-slate-200">
           <nav className="flex space-x-2 sm:space-x-6 overflow-x-auto custom-scrollbar pb-px">
             {[
-              { id: "tasks", label: "Task Board", icon: "💼" },
-              { id: "team", label: "Team Match & Opportunities", icon: "👥" },
+              { id: "tasks", label: "Task Marketplace", icon: "💼" },
               { id: "chat", label: "Messages", icon: "💬" },
               { id: "profile", label: "Profile", icon: "👤" },
               ...(user?.role === "ADMIN" ? [{ id: "admin", label: "Admin Panel", icon: "⚙️" }] : []),
@@ -650,11 +531,13 @@ export default function DashboardPage() {
                   <option value="ASSIGNED">Assigned</option>
                   <option value="IN_PROGRESS">In Progress</option>
                   <option value="COMPLETED">Completed</option>
+                  <option value="CANCELLED">Cancelled</option>
                 </select>
 
                 <button
                   onClick={() => setShowTaskModal(true)}
-                  className="bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs px-4 py-2 rounded-lg shadow-2xs transition"
+                  disabled={taskFeatureUnavailable}
+                  className="bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-semibold text-xs px-4 py-2 rounded-lg shadow-2xs transition"
                 >
                   + Post Task
                 </button>
@@ -665,7 +548,7 @@ export default function DashboardPage() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
               {tasks.length === 0 ? (
                 <div className="col-span-full bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-500 text-xs">
-                  No tasks available right now. Post a task to get started!
+                  {taskFeatureUnavailable ? "Task Marketplace is temporarily disabled by an administrator." : "No tasks available right now. Post a task to get started!"}
                 </div>
               ) : (
                 tasks.map((task) => (
@@ -696,14 +579,14 @@ export default function DashboardPage() {
                       <div className="flex gap-2">
                         {task.isRequester ? (
                           <button
-                            onClick={() => setSelectedTask(task)}
+                            onClick={() => fetchSingleTask(task.id)}
                             className="flex-1 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs rounded-lg transition"
                           >
-                            Manage Task ({task.applications?.length || 0})
+                            Manage Task ({task.applicationsCount || 0})
                           </button>
                         ) : (
                           <button
-                            onClick={() => setSelectedTask(task)}
+                            onClick={() => fetchSingleTask(task.id)}
                             className="flex-1 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs rounded-lg transition"
                           >
                             View Details
@@ -719,182 +602,29 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* TAB 2: TEAM MATCH & OPPORTUNITY NETWORK */}
-        {activeTab === "team" && (
-          <div className="space-y-6">
+        {/* TAB 2: MESSAGES */}
 
-            {/* Header & Comprehensive Category Filter Toolbar */}
-            <div className="bg-white border border-slate-200 p-5 rounded-2xl space-y-4 shadow-2xs">
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                <div>
-                  <h2 className="text-lg font-bold text-slate-900 tracking-tight">Team Match & Opportunity Network</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">Find student teammates for projects, clubs, startups, research, tours & competitions</p>
-                </div>
-
-                <button
-                  onClick={() => setShowTeamModal(true)}
-                  className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-2xs transition"
-                >
-                  + Post Opportunity
-                </button>
-              </div>
-
-              {/* Category Filter Pills */}
-              <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100">
-                {[
-                  { id: "ALL", label: "All Opportunities" },
-                  { id: "ACADEMIC", label: "Academic & Projects" },
-                  { id: "CLUB", label: "Clubs & Competitions" },
-                  { id: "STARTUP", label: "Startup & Business" },
-                  { id: "TOUR", label: "Tours & Activities" },
-                  { id: "SKILLS", label: "Skills & Collaboration" },
-                ].map((cat) => (
-                  <button
-                    key={cat.id}
-                    onClick={() => setTeamFilter({ ...teamFilter, category: cat.id })}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                      teamFilter.category === cat.id
-                        ? "bg-purple-600 text-white shadow-2xs"
-                        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                    }`}
-                  >
-                    {cat.label}
-                  </button>
-                ))}
-              </div>
-
-              {/* Search & Secondary Filters */}
-              <div className="flex flex-wrap items-center gap-3">
-                <input
-                  type="text"
-                  placeholder="Search by title, skills, keywords..."
-                  value={teamFilter.search}
-                  onChange={(e) => setTeamFilter({ ...teamFilter, search: e.target.value })}
-                  className="bg-white border border-slate-300 text-xs text-slate-900 rounded-xl px-3.5 py-2 focus:outline-none focus:border-purple-600 flex-1 min-w-[200px]"
-                />
-
-                <select
-                  value={teamFilter.department}
-                  onChange={(e) => setTeamFilter({ ...teamFilter, department: e.target.value })}
-                  className="bg-white border border-slate-300 text-xs text-slate-700 rounded-xl px-3 py-2 focus:outline-none focus:border-purple-600"
-                >
-                  <option value="ALL">All Departments</option>
-                  <option value="CSE">Computer Science (CSE)</option>
-                  <option value="SWE">Software Engineering (SWE)</option>
-                  <option value="EEE">Electrical (EEE)</option>
-                  <option value="BBA">Business (BBA)</option>
-                  <option value="ENGLISH">English</option>
-                  <option value="OTHER">Other</option>
-                </select>
-
-                <select
-                  value={teamFilter.status}
-                  onChange={(e) => setTeamFilter({ ...teamFilter, status: e.target.value })}
-                  className="bg-white border border-slate-300 text-xs text-slate-700 rounded-xl px-3 py-2 focus:outline-none focus:border-purple-600"
-                >
-                  <option value="OPEN">Open Only</option>
-                  <option value="CLOSED">Closed Only</option>
-                  <option value="ALL">All Status</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Opportunities Card Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-              {teamPosts.length === 0 ? (
-                <div className="col-span-full bg-white border border-slate-200 rounded-2xl p-12 text-center text-slate-500 text-xs">
-                  No opportunities match your filter criteria. Be the first to post one!
-                </div>
-              ) : (
-                teamPosts.map((post) => (
-                  <div key={post.id} className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-2xs hover:shadow-md transition flex flex-col justify-between space-y-4">
-                    <div className="space-y-3">
-
-                      {/* Top Badges */}
-                      <div className="flex justify-between items-start">
-                        <span className="text-[10px] font-extrabold text-purple-700 bg-purple-50 border border-purple-200/60 px-2.5 py-0.5 rounded-full uppercase tracking-wide">
-                          {post.category}
-                        </span>
-                        {post.subCategory && (
-                          <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
-                            {post.subCategory}
-                          </span>
-                        )}
-                      </div>
-
-                      <h3 className="font-bold text-base text-slate-900 leading-snug">{post.title}</h3>
-                      <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">{post.description}</p>
-
-                      {/* Looking For snippet */}
-                      {post.lookingFor && (
-                        <div className="bg-purple-50/50 border border-purple-100 rounded-xl p-2.5 text-xs text-purple-900">
-                          <span className="font-bold text-[11px] block text-purple-700">Looking For:</span>
-                          <span className="text-slate-700 text-[11px] line-clamp-1">{post.lookingFor}</span>
-                        </div>
-                      )}
-
-                      {/* Skills Chips */}
-                      {post.requiredSkills && (
-                        <div className="flex flex-wrap gap-1.5">
-                          {post.requiredSkills.split(",").map((sk: string, idx: number) => (
-                            <span key={idx} className="bg-slate-100 text-slate-700 text-[10px] font-bold px-2 py-0.5 rounded-md">
-                              {sk.trim()}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Creator Identity & Meta Footer */}
-                    <div className="pt-3 border-t border-slate-100 space-y-3">
-                      <div className="flex justify-between items-center text-xs">
-                        <div>
-                          <span className="font-bold text-slate-900 text-xs block">{post.authorName}</span>
-                          <span className="text-[11px] text-slate-500">{post.authorDepartment || "DIU Student"} {post.authorBatch ? `(Batch ${post.authorBatch})` : ""}</span>
-                        </div>
-                        <span className="bg-slate-100 text-slate-700 text-[11px] font-bold px-2 py-0.5 rounded-full">
-                          👥 {post.peopleNeeded || 1} Needed
-                        </span>
-                      </div>
-
-                      <button
-                        onClick={() => fetchSingleTeamPost(post.id)}
-                        className="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl transition shadow-2xs"
-                      >
-                        View Opportunity & Apply →
-                      </button>
-                    </div>
-
-                  </div>
-                ))
-              )}
-            </div>
-
-          </div>
-        )}
-
-        {/* TAB 3: MESSAGES */}
         {activeTab === "chat" && (
-          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xs flex flex-col md:flex-row h-[600px] overflow-hidden">
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-2xs flex flex-col md:flex-row h-[72vh] min-h-[560px] md:h-[600px] overflow-hidden">
             {/* Left: Conversation List */}
-            <div className="w-full md:w-1/3 border-b md:border-b-0 md:border-r border-slate-200 flex flex-col">
+            <div className="w-full md:w-1/3 max-h-56 md:max-h-none border-b md:border-b-0 md:border-r border-slate-200 flex flex-col">
               <div className="p-4 border-b border-slate-100 bg-slate-50/50">
                 <h3 className="font-bold text-sm text-slate-900">Conversations</h3>
               </div>
 
               <div className="flex-1 overflow-y-auto custom-scrollbar divide-y divide-slate-100">
                 {conversations.length === 0 ? (
-                  <p className="p-6 text-xs text-slate-400 italic text-center">No active conversations. Accept a team application or task to start chatting!</p>
+                  <p className="p-6 text-xs text-slate-400 italic text-center">No active conversations yet. A private conversation appears after a requester assigns a worker to a task.</p>
                 ) : (
                   conversations.map((conv) => {
                     const isSelected = activeConversation?.id === conv.id;
-                    const otherUser = conv.otherUser || { fullName: "Student User", email: "User" };
+                    const otherUser = conv.otherUser || { fullName: "Task participant" };
                     return (
                       <button
                         key={conv.id}
                         onClick={() => openConversation(conv)}
                         className={`w-full text-left p-4 hover:bg-slate-50 transition flex items-center gap-3 ${
-                          isSelected ? "bg-purple-50/60 border-l-4 border-purple-600" : ""
+                          isSelected ? "bg-emerald-50/60 border-l-4 border-emerald-600" : ""
                         }`}
                       >
                         <div className="w-9 h-9 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-xs">
@@ -915,43 +645,73 @@ export default function DashboardPage() {
             <div className="flex-1 flex flex-col bg-slate-50/30">
               {activeConversation ? (
                 <>
-                  <div className="p-4 border-b border-slate-200 bg-white flex justify-between items-center">
+                  <div className="p-4 border-b border-slate-200 bg-white flex flex-wrap gap-3 justify-between items-center">
                     <div>
                       <h4 className="font-bold text-sm text-slate-900">{activeConversation.otherUser?.fullName || "Chat"}</h4>
-                      <p className="text-[11px] text-slate-500">{activeConversation.otherUser?.email}</p>
+                      <p className="text-[11px] text-slate-500">
+                        {`${activeConversation.contextTitle || "Task conversation"} • anonymous task identity`}
+                      </p>
                     </div>
+                    <button
+                      type="button"
+                      onClick={handleToggleBlock}
+                      className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border ${activeConversation.blockedByMe ? "bg-emerald-50 text-emerald-700 border-emerald-200" : "bg-white text-rose-700 border-rose-200"}`}
+                    >
+                      {activeConversation.blockedByMe ? "Unblock" : "Block"}
+                    </button>
                   </div>
 
                   <div className="flex-1 p-4 overflow-y-auto custom-scrollbar space-y-3">
                     {messages.map((m) => {
-                      const isMe = m.senderId === user?.id;
+                      const isMe = Boolean(m.isMe);
                       return (
                         <div key={m.id} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
-                          <div className={`max-w-[75%] p-3 rounded-2xl text-xs ${
+                          <div className={`max-w-[82%] md:max-w-[75%] p-3 rounded-2xl text-xs ${
                             isMe ? "bg-slate-900 text-white rounded-br-none" : "bg-white border border-slate-200 text-slate-800 rounded-bl-none shadow-2xs"
                           }`}>
-                            <p>{m.content}</p>
-                            <span className="text-[9px] opacity-60 block text-right mt-1">
-                              {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
+                            <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                            <div className="flex items-center justify-end gap-2 mt-1">
+                              {!isMe && (
+                                <button
+                                  type="button"
+                                  onClick={() => openReportMessage(m.id, m.content)}
+                                  className="text-[9px] underline opacity-60 hover:opacity-100"
+                                >
+                                  Report
+                                </button>
+                              )}
+                              <span className="text-[9px] opacity-60">
+                                {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
                           </div>
                         </div>
                       );
                     })}
                   </div>
 
-                  <form onSubmit={handleSendMessage} className="p-3 border-t border-slate-200 bg-white flex gap-2">
-                    <input
-                      type="text"
-                      placeholder="Type a message..."
-                      value={newMessageText}
-                      onChange={(e) => setNewMessageText(e.target.value)}
-                      className="flex-1 bg-slate-50 border border-slate-300 rounded-xl px-4 py-2 text-xs focus:outline-none focus:border-purple-600"
-                    />
-                    <button type="submit" className="bg-slate-900 text-white font-bold text-xs px-5 py-2 rounded-xl hover:bg-slate-800 transition">
-                      Send
-                    </button>
-                  </form>
+                  <div className="border-t border-slate-200 bg-white">
+                    {(activeConversation.blockedByMe || activeConversation.blockedMe) ? (
+                      <p className="p-3 text-center text-xs text-rose-700 bg-rose-50">Messaging is paused because one participant has blocked the other.</p>
+                    ) : (
+                      <>
+                        <p className="px-3 pt-2 text-[10px] text-slate-500">Adult/sexual content, threats, harassment and spam are not allowed. Messages can be reported.</p>
+                        <form onSubmit={handleSendMessage} className="p-3 pt-2 flex gap-2">
+                          <input
+                            type="text"
+                            maxLength={2000}
+                            placeholder="Type a message..."
+                            value={newMessageText}
+                            onChange={(e) => setNewMessageText(e.target.value)}
+                            className="flex-1 min-w-0 bg-slate-50 border border-slate-300 rounded-xl px-4 py-2 text-xs focus:outline-none focus:border-emerald-600"
+                          />
+                          <button type="submit" className="bg-slate-900 text-white font-bold text-xs px-4 sm:px-5 py-2 rounded-xl hover:bg-slate-800 transition">
+                            Send
+                          </button>
+                        </form>
+                      </>
+                    )}
+                  </div>
                 </>
               ) : (
                 <div className="flex-1 flex items-center justify-center text-xs text-slate-400 italic p-6">
@@ -962,12 +722,12 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* TAB 4: PROFILE */}
+        {/* TAB 3: PROFILE */}
         {activeTab === "profile" && (
           <div className="max-w-2xl mx-auto w-full bg-white border border-slate-200 rounded-2xl p-6 shadow-2xs space-y-6">
             <div>
               <h2 className="text-lg font-bold text-slate-900 tracking-tight">Student Profile</h2>
-              <p className="text-xs text-slate-500 mt-0.5">Your verified DIU student information for Team Match and Task Marketplace</p>
+              <p className="text-xs text-slate-500 mt-0.5">Your verified DIU account details. Task Marketplace keeps participant identity anonymous inside task flows.</p>
             </div>
 
             <form onSubmit={handleUpdateProfile} className="space-y-4 text-xs">
@@ -987,7 +747,7 @@ export default function DashboardPage() {
                   type="text"
                   value={profileForm.fullName}
                   onChange={(e) => setProfileForm({ ...profileForm, fullName: e.target.value })}
-                  className="w-full bg-white border border-slate-300 rounded-xl p-3 text-slate-900 focus:outline-none focus:border-purple-600"
+                  className="w-full bg-white border border-slate-300 rounded-xl p-3 text-slate-900 focus:outline-none focus:border-emerald-600"
                   required
                 />
               </div>
@@ -1000,7 +760,7 @@ export default function DashboardPage() {
                     placeholder="e.g. CSE, SWE, EEE, BBA"
                     value={profileForm.department}
                     onChange={(e) => setProfileForm({ ...profileForm, department: e.target.value })}
-                    className="w-full bg-white border border-slate-300 rounded-xl p-3 text-slate-900 focus:outline-none focus:border-purple-600"
+                    className="w-full bg-white border border-slate-300 rounded-xl p-3 text-slate-900 focus:outline-none focus:border-emerald-600"
                   />
                 </div>
                 <div>
@@ -1010,7 +770,7 @@ export default function DashboardPage() {
                     placeholder="e.g. 58"
                     value={profileForm.batch}
                     onChange={(e) => setProfileForm({ ...profileForm, batch: e.target.value })}
-                    className="w-full bg-white border border-slate-300 rounded-xl p-3 text-slate-900 focus:outline-none focus:border-purple-600"
+                    className="w-full bg-white border border-slate-300 rounded-xl p-3 text-slate-900 focus:outline-none focus:border-emerald-600"
                   />
                 </div>
               </div>
@@ -1022,7 +782,7 @@ export default function DashboardPage() {
                   placeholder="e.g. React, Python, UI Design, Public Speaking"
                   value={profileForm.skills}
                   onChange={(e) => setProfileForm({ ...profileForm, skills: e.target.value })}
-                  className="w-full bg-white border border-slate-300 rounded-xl p-3 text-slate-900 focus:outline-none focus:border-purple-600"
+                  className="w-full bg-white border border-slate-300 rounded-xl p-3 text-slate-900 focus:outline-none focus:border-emerald-600"
                 />
               </div>
 
@@ -1033,7 +793,7 @@ export default function DashboardPage() {
                   placeholder="Brief summary of your academic interests and projects..."
                   value={profileForm.bio}
                   onChange={(e) => setProfileForm({ ...profileForm, bio: e.target.value })}
-                  className="w-full bg-white border border-slate-300 rounded-xl p-3 text-slate-900 focus:outline-none focus:border-purple-600"
+                  className="w-full bg-white border border-slate-300 rounded-xl p-3 text-slate-900 focus:outline-none focus:border-emerald-600"
                 />
               </div>
 
@@ -1047,7 +807,7 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* TAB 5: ADMIN PANEL */}
+        {/* TAB 4: ADMIN PANEL */}
         {activeTab === "admin" && user?.role === "ADMIN" && (
           <div className="space-y-6">
             <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-2xs space-y-4">
@@ -1055,7 +815,7 @@ export default function DashboardPage() {
 
               {/* Feature Settings Toggles */}
               {featureSettings && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                <div className="grid grid-cols-1 gap-4 pt-2">
                   <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex justify-between items-center">
                     <div>
                       <h4 className="font-bold text-xs text-slate-900">Task Marketplace</h4>
@@ -1071,20 +831,6 @@ export default function DashboardPage() {
                     </button>
                   </div>
 
-                  <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex justify-between items-center">
-                    <div>
-                      <h4 className="font-bold text-xs text-slate-900">Team Match Network</h4>
-                      <p className="text-[11px] text-slate-500">Enable/disable opportunity posts and matching</p>
-                    </div>
-                    <button
-                      onClick={() => handleToggleFeature("teamMatchEnabled", featureSettings.teamMatchEnabled)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold text-white ${
-                        featureSettings.teamMatchEnabled ? "bg-purple-600" : "bg-slate-400"
-                      }`}
-                    >
-                      {featureSettings.teamMatchEnabled ? "ACTIVE" : "DISABLED"}
-                    </button>
-                  </div>
                 </div>
               )}
             </div>
@@ -1131,6 +877,36 @@ export default function DashboardPage() {
                   </tbody>
                 </table>
               </div>
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-2xs space-y-4">
+              <div>
+                <h3 className="font-bold text-sm text-slate-900">Message Safety Reports</h3>
+                <p className="text-[11px] text-slate-500 mt-1">Review reports submitted from participant conversations.</p>
+              </div>
+              {adminReports.length === 0 ? (
+                <p className="text-xs text-slate-400 italic">No message reports.</p>
+              ) : (
+                <div className="space-y-3">
+                  {adminReports.map((report) => (
+                    <div key={report.id} className="border border-slate-200 rounded-xl p-4 space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-xs font-bold text-slate-900">{report.reason} • {report.status}</div>
+                        <div className="text-[10px] text-slate-500">{new Date(report.createdAt).toLocaleString()}</div>
+                      </div>
+                      <p className="text-xs text-slate-700 bg-slate-50 rounded-lg p-2 break-words">{report.message?.content}</p>
+                      <p className="text-[10px] text-slate-500">Reporter: {report.reporter?.profile?.fullName || report.reporter?.email}</p>
+                      {report.status === "OPEN" && (
+                        <div className="flex flex-wrap gap-2">
+                          <button onClick={() => handleUpdateReport(report.id, "REVIEWED")} className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-[10px] font-bold">Reviewed</button>
+                          <button onClick={() => handleUpdateReport(report.id, "ACTION_TAKEN")} className="px-3 py-1.5 rounded-lg bg-rose-600 text-white text-[10px] font-bold">Action Taken</button>
+                          <button onClick={() => handleUpdateReport(report.id, "DISMISSED")} className="px-3 py-1.5 rounded-lg bg-slate-200 text-slate-700 text-[10px] font-bold">Dismiss</button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1220,322 +996,6 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* MODAL: Post Team Opportunity */}
-      {showTeamModal && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white border border-slate-200 rounded-2xl max-w-xl w-full p-6 space-y-4 max-h-[90vh] overflow-y-auto custom-scrollbar shadow-xl text-slate-900">
-            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-              <div>
-                <h3 className="font-bold text-base text-slate-900">Post Opportunity</h3>
-                <p className="text-[11px] text-slate-500">Find teammates, partners, or activity groups</p>
-              </div>
-              <button onClick={() => setShowTeamModal(false)} className="text-slate-400 hover:text-slate-600 px-2">✕</button>
-            </div>
-
-            <form onSubmit={handleCreateTeamPost} className="space-y-3.5 text-xs">
-              <div>
-                <label className="block text-slate-700 font-bold mb-1">Opportunity Title *</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Need 2 Teammates for National AI Hackathon"
-                  value={newTeamPost.title}
-                  onChange={(e) => setNewTeamPost({ ...newTeamPost, title: e.target.value })}
-                  className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-slate-900"
-                  required
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">Category *</label>
-                  <select
-                    value={newTeamPost.category}
-                    onChange={(e) => setNewTeamPost({ ...newTeamPost, category: e.target.value })}
-                    className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-slate-900"
-                  >
-                    <option value="ACADEMIC">Academic & Projects</option>
-                    <option value="CLUB">Clubs & Competitions</option>
-                    <option value="STARTUP">Startup & Business</option>
-                    <option value="TOUR">Tours & Activities</option>
-                    <option value="SKILLS">Skills & Collaboration</option>
-                    <option value="OTHER">Other</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">Sub-Category</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Thesis, Hackathon, Co-founder"
-                    value={newTeamPost.subCategory}
-                    onChange={(e) => setNewTeamPost({ ...newTeamPost, subCategory: e.target.value })}
-                    className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-slate-900"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-slate-700 font-bold mb-1">Description *</label>
-                <textarea
-                  rows={3}
-                  placeholder="Describe the opportunity, goals, and details..."
-                  value={newTeamPost.description}
-                  onChange={(e) => setNewTeamPost({ ...newTeamPost, description: e.target.value })}
-                  className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-slate-900"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-slate-700 font-bold mb-1">What are you looking for in a teammate?</label>
-                <input
-                  type="text"
-                  placeholder="e.g. Dedicated student with interest in Machine Learning"
-                  value={newTeamPost.lookingFor}
-                  onChange={(e) => setNewTeamPost({ ...newTeamPost, lookingFor: e.target.value })}
-                  className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-slate-900"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">Required Skills / Interests</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Python, React, Data Analysis"
-                    value={newTeamPost.requiredSkills}
-                    onChange={(e) => setNewTeamPost({ ...newTeamPost, requiredSkills: e.target.value })}
-                    className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-slate-900"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">People Needed</label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={newTeamPost.peopleNeeded}
-                    onChange={(e) => setNewTeamPost({ ...newTeamPost, peopleNeeded: e.target.value })}
-                    className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-slate-900"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">Department</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. CSE, SWE"
-                    value={newTeamPost.department}
-                    onChange={(e) => setNewTeamPost({ ...newTeamPost, department: e.target.value })}
-                    className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-slate-900"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">Preferred Batch</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. 58"
-                    value={newTeamPost.preferredBatch}
-                    onChange={(e) => setNewTeamPost({ ...newTeamPost, preferredBatch: e.target.value })}
-                    className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-slate-900"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">Meeting Preference</label>
-                  <select
-                    value={newTeamPost.meetingPreference}
-                    onChange={(e) => setNewTeamPost({ ...newTeamPost, meetingPreference: e.target.value })}
-                    className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-slate-900"
-                  >
-                    <option value="In-Person">In-Person (Campus)</option>
-                    <option value="Online">Online / Remote</option>
-                    <option value="Hybrid">Hybrid</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-slate-700 font-bold mb-1">Location / Venue</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Knowledge Tower / Online"
-                    value={newTeamPost.location}
-                    onChange={(e) => setNewTeamPost({ ...newTeamPost, location: e.target.value })}
-                    className="w-full bg-white border border-slate-300 rounded-xl p-2.5 text-slate-900"
-                  />
-                </div>
-              </div>
-
-              <div className="flex gap-2 pt-3 border-t border-slate-100">
-                <button type="button" onClick={() => setShowTeamModal(false)} className="flex-1 py-2.5 bg-slate-100 text-slate-700 font-bold rounded-xl">Cancel</button>
-                <button type="submit" className="flex-1 py-2.5 bg-purple-600 text-white font-bold rounded-xl shadow-2xs">Publish Opportunity</button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL: View Opportunity Details & Applications */}
-      {selectedTeamPost && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
-          <div className="bg-white border border-slate-200 rounded-2xl max-w-2xl w-full p-6 space-y-5 max-h-[90vh] overflow-y-auto custom-scrollbar shadow-xl text-slate-900">
-
-            <div className="flex justify-between items-start border-b border-slate-100 pb-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-extrabold text-purple-700 bg-purple-50 px-2.5 py-0.5 rounded-full uppercase">
-                    {selectedTeamPost.category}
-                  </span>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                    selectedTeamPost.status === "OPEN" ? "bg-emerald-100 text-emerald-800" : "bg-slate-100 text-slate-600"
-                  }`}>
-                    {selectedTeamPost.status}
-                  </span>
-                </div>
-                <h3 className="font-bold text-lg text-slate-900 mt-1">{selectedTeamPost.title}</h3>
-              </div>
-              <button onClick={() => setSelectedTeamPost(null)} className="text-slate-400 hover:text-slate-600 px-2 text-base">✕</button>
-            </div>
-
-            {/* Creator Identity Info Box */}
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-center justify-between text-xs">
-              <div>
-                <span className="font-bold text-slate-900 text-sm block">{selectedTeamPost.authorName}</span>
-                <span className="text-slate-500">{selectedTeamPost.authorDepartment} • Batch {selectedTeamPost.authorBatch || "N/A"}</span>
-                <span className="text-slate-400 block text-[11px] mt-0.5">{selectedTeamPost.authorEmail}</span>
-              </div>
-              <div className="text-right">
-                <span className="text-amber-600 font-bold block">⭐ {selectedTeamPost.authorRating}</span>
-                <span className="text-slate-500 text-[11px]">👥 {selectedTeamPost.peopleNeeded || 1} Needed</span>
-              </div>
-            </div>
-
-            <div className="space-y-3 text-xs text-slate-700 leading-relaxed">
-              <div>
-                <h4 className="font-bold text-slate-900 text-xs mb-1">Description</h4>
-                <p className="bg-slate-50 p-3 rounded-xl border border-slate-100">{selectedTeamPost.description}</p>
-              </div>
-
-              {selectedTeamPost.lookingFor && (
-                <div>
-                  <h4 className="font-bold text-slate-900 text-xs mb-1">What Creator is Looking For</h4>
-                  <p className="bg-purple-50/60 text-purple-900 p-3 rounded-xl border border-purple-100">{selectedTeamPost.lookingFor}</p>
-                </div>
-              )}
-
-              {selectedTeamPost.requiredSkills && (
-                <div>
-                  <h4 className="font-bold text-slate-900 text-xs mb-1">Required Skills</h4>
-                  <div className="flex flex-wrap gap-1.5">
-                    {selectedTeamPost.requiredSkills.split(",").map((sk: string, idx: number) => (
-                      <span key={idx} className="bg-slate-100 text-slate-800 text-xs font-semibold px-2.5 py-1 rounded-lg">
-                        {sk.trim()}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* IF NOT CREATOR: Application Form */}
-            {!selectedTeamPost.isAuthor && (
-              <div className="pt-4 border-t border-slate-100 space-y-3">
-                {selectedTeamPost.hasApplied ? (
-                  <div className="p-3.5 bg-blue-50 border border-blue-200 text-blue-900 rounded-xl text-xs flex justify-between items-center">
-                    <span>You have applied to this opportunity. Status: <strong className="uppercase">{selectedTeamPost.myApplicationStatus}</strong></span>
-                  </div>
-                ) : selectedTeamPost.status === "OPEN" ? (
-                  <form onSubmit={handleApplyTeamPost} className="space-y-3">
-                    <label className="block text-xs font-bold text-slate-900">Express Interest / Pitch Message</label>
-                    <textarea
-                      rows={2}
-                      placeholder="Introduce yourself and explain why you're interested..."
-                      value={teamApplyMessage}
-                      onChange={(e) => setTeamApplyMessage(e.target.value)}
-                      className="w-full bg-white border border-slate-300 rounded-xl p-3 text-xs focus:outline-none focus:border-purple-600"
-                    />
-                    <button type="submit" className="w-full py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl shadow-2xs">
-                      Submit Interest
-                    </button>
-                  </form>
-                ) : (
-                  <div className="p-3 bg-slate-100 text-slate-500 rounded-xl text-xs text-center">
-                    This opportunity is closed for new applications.
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* IF CREATOR: Review Applicants & Controls */}
-            {selectedTeamPost.isAuthor && (
-              <div className="pt-4 border-t border-slate-100 space-y-4">
-                <div className="flex justify-between items-center">
-                  <h4 className="font-bold text-xs text-slate-900">Applicants ({selectedTeamPost.applications?.length || 0})</h4>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => handleToggleTeamStatus(selectedTeamPost.id, selectedTeamPost.status)}
-                      className="px-3 py-1.5 bg-slate-100 text-slate-700 font-bold text-xs rounded-lg hover:bg-slate-200"
-                    >
-                      Toggle {selectedTeamPost.status === "OPEN" ? "Close" : "Open"}
-                    </button>
-                    <button
-                      onClick={() => handleDeleteTeamPost(selectedTeamPost.id)}
-                      className="px-3 py-1.5 bg-rose-600 text-white font-bold text-xs rounded-lg hover:bg-rose-700"
-                    >
-                      Delete Post
-                    </button>
-                  </div>
-                </div>
-
-                <div className="space-y-2.5 max-h-60 overflow-y-auto custom-scrollbar">
-                  {selectedTeamPost.applications?.length === 0 ? (
-                    <p className="text-xs text-slate-400 italic text-center py-4">No applications received yet.</p>
-                  ) : (
-                    selectedTeamPost.applications?.map((app: any) => (
-                      <div key={app.id} className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl text-xs space-y-2">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <span className="font-bold text-slate-900">{app.applicantName}</span>
-                            <span className="text-[11px] text-slate-500 block">{app.applicantDepartment} (Batch {app.applicantBatch || "N/A"}) • {app.applicantEmail}</span>
-                          </div>
-                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
-                            app.status === "ACCEPTED" ? "bg-emerald-100 text-emerald-800" :
-                            app.status === "REJECTED" ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800"
-                          }`}>
-                            {app.status}
-                          </span>
-                        </div>
-
-                        {app.message && <p className="text-slate-600 italic text-[11px]">"{app.message}"</p>}
-
-                        {app.status === "PENDING" && (
-                          <div className="flex gap-2 pt-1">
-                            <button
-                              onClick={() => handleUpdateApplicationStatus(app.id, "ACCEPTED")}
-                              className="px-3 py-1 bg-emerald-600 text-white font-bold text-[11px] rounded-lg hover:bg-emerald-700"
-                            >
-                              Accept & Connect Chat
-                            </button>
-                            <button
-                              onClick={() => handleUpdateApplicationStatus(app.id, "REJECTED")}
-                              className="px-3 py-1 bg-slate-200 text-slate-700 font-bold text-[11px] rounded-lg hover:bg-slate-300"
-                            >
-                              Reject
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            )}
-
-          </div>
-        </div>
-      )}
-
       {/* MODAL: View Task Details & Applicants */}
       {selectedTask && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4 z-50">
@@ -1575,6 +1035,36 @@ export default function DashboardPage() {
               </div>
             )}
 
+            {selectedTask.canRate && (
+              <div className="pt-3 border-t border-slate-100">
+                <button onClick={() => setShowRatingModal(true)} className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-xl">Rate Task Participant</button>
+              </div>
+            )}
+
+            {selectedTask.status === "COMPLETED" && selectedTask.hasRated && (
+              <p className="pt-3 border-t border-slate-100 text-xs text-emerald-700 font-semibold">Your rating for this task has been submitted.</p>
+            )}
+
+            {(selectedTask.isRequester || selectedTask.isWorker) && selectedTask.status !== "OPEN" && selectedTask.status !== "COMPLETED" && selectedTask.status !== "CANCELLED" && (
+              <div className="pt-3 border-t border-slate-100 flex flex-wrap gap-2">
+                {selectedTask.status === "ASSIGNED" && (
+                  <button onClick={() => handleTaskStatus(selectedTask.id, "IN_PROGRESS")} className="px-4 py-2 bg-blue-600 text-white font-bold text-xs rounded-xl">Start Task</button>
+                )}
+                {selectedTask.status === "IN_PROGRESS" && (
+                  <button onClick={() => handleTaskStatus(selectedTask.id, "COMPLETED")} className="px-4 py-2 bg-emerald-600 text-white font-bold text-xs rounded-xl">Mark Completed</button>
+                )}
+                {selectedTask.isRequester && (
+                  <button onClick={() => confirm("Cancel this task?") && handleTaskStatus(selectedTask.id, "CANCELLED")} className="px-4 py-2 bg-rose-50 text-rose-700 border border-rose-200 font-bold text-xs rounded-xl">Cancel Task</button>
+                )}
+              </div>
+            )}
+
+            {selectedTask.isRequester && selectedTask.status === "OPEN" && (
+              <div className="pt-3 border-t border-slate-100">
+                <button onClick={() => confirm("Cancel this task?") && handleTaskStatus(selectedTask.id, "CANCELLED")} className="px-4 py-2 bg-rose-50 text-rose-700 border border-rose-200 font-bold text-xs rounded-xl">Cancel Task</button>
+              </div>
+            )}
+
             {selectedTask.isRequester && (
               <div className="pt-3 border-t border-slate-100 space-y-3">
                 <h4 className="font-bold text-xs text-slate-900">Task Applicants</h4>
@@ -1590,7 +1080,7 @@ export default function DashboardPage() {
                         </div>
                         {selectedTask.status === "OPEN" && (
                           <button
-                            onClick={() => handleSelectWorker(selectedTask.id, app.applicantId)}
+                            onClick={() => handleSelectWorker(selectedTask.id, app.id)}
                             className="px-3 py-1 bg-slate-900 text-white font-bold text-[11px] rounded-lg"
                           >
                             Assign Task
@@ -1606,6 +1096,78 @@ export default function DashboardPage() {
         </div>
       )}
 
+
+      {reportTarget && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-[70]">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 shadow-xl">
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <h3 className="font-bold text-base text-slate-900">Report Message</h3>
+                <p className="text-[11px] text-slate-500 mt-1">Reports are sent to Synora administrators for review.</p>
+              </div>
+              <button type="button" onClick={() => setReportTarget(null)} className="text-slate-400 hover:text-slate-600">✕</button>
+            </div>
+            <div className="mb-4 rounded-xl bg-slate-50 border border-slate-200 p-3 text-xs text-slate-600 break-words">
+              {reportTarget.preview || "Message"}
+            </div>
+            <form onSubmit={handleReportMessage} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Reason</label>
+                <select
+                  value={reportForm.reason}
+                  onChange={(e) => setReportForm({ ...reportForm, reason: e.target.value })}
+                  className="w-full border border-slate-300 rounded-xl p-2.5 bg-white"
+                >
+                  <option value="HARASSMENT">Harassment</option>
+                  <option value="ADULT_CONTENT">Adult / sexual content</option>
+                  <option value="THREAT">Threat or intimidation</option>
+                  <option value="SPAM">Spam</option>
+                  <option value="OTHER">Other</option>
+                </select>
+              </div>
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Extra details (optional)</label>
+                <textarea
+                  rows={3}
+                  maxLength={1000}
+                  value={reportForm.details}
+                  onChange={(e) => setReportForm({ ...reportForm, details: e.target.value })}
+                  className="w-full border border-slate-300 rounded-xl p-2.5"
+                  placeholder="Add context that will help an administrator review this report."
+                />
+              </div>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setReportTarget(null)} className="flex-1 py-2.5 border border-slate-300 text-slate-700 font-bold rounded-xl">Cancel</button>
+                <button type="submit" className="flex-1 py-2.5 bg-rose-700 text-white font-bold rounded-xl">Submit Report</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showRatingModal && selectedTask && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4 z-[60]">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 shadow-xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-bold text-base text-slate-900">Rate Task Participant</h3>
+              <button onClick={() => setShowRatingModal(false)} className="text-slate-400 hover:text-slate-600">✕</button>
+            </div>
+            <form onSubmit={handleRateTask} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Score</label>
+                <select value={taskRatingForm.score} onChange={(e) => setTaskRatingForm({ ...taskRatingForm, score: Number(e.target.value) })} className="w-full border border-slate-300 rounded-xl p-2.5">
+                  {[5,4,3,2,1].map((score) => <option key={score} value={score}>{score} / 5</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Comment (optional)</label>
+                <textarea maxLength={1000} rows={3} value={taskRatingForm.comment} onChange={(e) => setTaskRatingForm({ ...taskRatingForm, comment: e.target.value })} className="w-full border border-slate-300 rounded-xl p-2.5" placeholder="Keep feedback respectful and task-focused." />
+              </div>
+              <button type="submit" className="w-full py-2.5 bg-slate-900 text-white font-bold rounded-xl">Submit Rating</button>
+            </form>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
